@@ -33,7 +33,7 @@ namespace TowFast_API.Controllers
             {
                 return Ok(new LoginResponse
                 {
-                    Id = user.Id,
+                    Id = user.Id_Login,
                     Username = user.Username,
                     Email = user.Email,
                     Message = "Login bem-sucedido!"
@@ -74,7 +74,7 @@ namespace TowFast_API.Controllers
             _dbContext.Users.Add(user);
             await _dbContext.SaveChangesAsync();
 
-            return CreatedAtAction(nameof(Register), new { id = user.Id }, user);
+            return CreatedAtAction(nameof(Register), new { id = user.Id_Login }, user);
         }
 
         [HttpPut("updatePassword")]
