@@ -11,6 +11,13 @@ namespace TowFast_API.Context
         }
 
         public DbSet<LogarModel> Users { get; set; }
+        public DbSet<Endereco> Endereco { get; set; }
+        public DbSet<AtualizaCliente> Cliente { get; set; }
+        public DbSet<AtualizaGuincho> Guincho { get; set; }
+        public DbSet<Veiculo> Veiculo { get; set; }
+
+
+
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
