@@ -6,6 +6,9 @@ using TowFast_API.Context;
 using BCrypt.Net;
 using System.Text.Json.Serialization;
 using System.ComponentModel.DataAnnotations;
+using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Configuration;
+using System.Data;
 
 namespace TowFast_API.Controllers
 {
@@ -14,69 +17,111 @@ namespace TowFast_API.Controllers
     public class LogarController : ControllerBase
     {
         private readonly TowFastDbContext _dbContext;
+        private readonly IConfiguration _configuration;
 
-        public LogarController(TowFastDbContext dbContext)
+        public LogarController(TowFastDbContext dbContext, IConfiguration configuration)
         {
             _dbContext = dbContext;
+            _configuration = configuration;
         }
 
-        [HttpPost("login")] // Endpoint para login completo com verificação de senha
+        // Endpoint para login
+        [HttpPost("login")]
         public async Task<ActionResult<LoginResponse>> Login([FromBody] LoginRequest request)
         {
             if (request == null || string.IsNullOrEmpty(request.Email) || string.IsNullOrEmpty(request.Password))
             {
-                return BadRequest("Username and password are required.");
+                return BadRequest("Email e senha são obrigatórios.");
             }
 
             var user = await _dbContext.Users
+                .AsNoTracking()
                 .FirstOrDefaultAsync(x => EF.Functions.Like(x.Email.ToLower(), request.Email.ToLower()));
 
             if (user != null && BCrypt.Net.BCrypt.Verify(request.Password, user.Password))
             {
-                return Ok(new LoginResponse
+                if (user.tipo == "Motorista")
                 {
-                    Id = user.Id_Cliente,
-                    Email = user.Email,
-                    Message = "Login bem-sucedido!",
-                    Tipo = user.tipo
-                });
+                    var motorista = await _dbContext.Cliente
+                        .AsNoTracking()
+                        .Where(c => c.Id_Cliente == user.Id_Cliente)
+                        .FirstOrDefaultAsync();
+
+                    if (motorista == null)
+                        return NotFound("Motorista não encontrado.");
+
+                    return Ok(new LoginResponse
+                    {
+                        Id = user.Id_Cliente,
+                        Id_Endereco = motorista.Id_Endereco,
+                        Id_Veiculo = motorista.Id_Veiculo,
+                        Email = user.Email,
+                        Message = "Login bem-sucedido!",
+                        Tipo = user.tipo,
+                    });
+                }
+                else if (user.tipo == "Guincho")
+                {
+                    var guincho = await _dbContext.Guincho
+                        .AsNoTracking()
+                        .Where(g => g.Id_Cliente == user.Id_Cliente)
+                        .FirstOrDefaultAsync();
+
+                    if (guincho == null)
+                        return NotFound("Guincho não encontrado.");
+
+                    return Ok(new LoginResponse
+                    {
+                        Id = user.Id_Cliente,
+                        Id_Endereco = guincho.Id_Endereco,
+                        Id_Veiculo = guincho.Id_Veiculo,
+                        Email = user.Email,
+                        Message = "Login bem-sucedido!",
+                        Tipo = user.tipo,
+                    });
+                }
             }
 
             return Unauthorized(new { Message = "Usuário ou senha incorretos." });
         }
 
-        [HttpPost("user")] // Endpoint para verificar existência do usuário sem senha
+        // Endpoint para verificar existência de usuário
+        [HttpPost("user")]
         public async Task<ActionResult> CheckUserExists([FromBody] UsernameRequest request)
         {
             if (request == null || string.IsNullOrEmpty(request.Username))
             {
-                return BadRequest("Username is required.");
+                return BadRequest("O email do usuário é obrigatório.");
             }
 
-            var user = await _dbContext.Users
-                .FirstOrDefaultAsync(x => EF.Functions.Like(x.Email.ToLower(), request.Username.ToLower()));
+            var userExists = await _dbContext.Users
+                .AsNoTracking()
+                .AnyAsync(x => EF.Functions.Like(x.Email.ToLower(), request.Username.ToLower()));
 
-            if (user != null)
+            if (userExists)
             {
-                return Ok(new { Id = user.Id_Cliente, Message = "Usuário encontrado. Pode prosseguir." });
+                return Ok(new { Message = "Usuário encontrado. Pode prosseguir." });
             }
 
             return NotFound(new { Message = "Usuário não encontrado." });
         }
 
+        // Endpoint para registrar usuário
         [HttpPost("register")]
         public async Task<IActionResult> Register([FromBody] ModelGeral registerModel)
         {
             if (registerModel == null || string.IsNullOrEmpty(registerModel.Email) || string.IsNullOrEmpty(registerModel.Password))
             {
-                return BadRequest("Username and password are required.");
+                return BadRequest("Email e senha são obrigatórios.");
             }
 
             var existingUser = await _dbContext.Users
-                .FirstOrDefaultAsync(x => EF.Functions.Like(x.Email.ToLower(), registerModel.Email.ToLower()));
-            if (existingUser != null)
+                .AsNoTracking()
+                .AnyAsync(x => EF.Functions.Like(x.Email.ToLower(), registerModel.Email.ToLower()));
+
+            if (existingUser)
             {
-                return BadRequest("Username already exists.");
+                return BadRequest("Usuário já existe.");
             }
 
             string hashedPassword = BCrypt.Net.BCrypt.HashPassword(registerModel.Password);
@@ -88,33 +133,26 @@ namespace TowFast_API.Controllers
                 Email = registerModel.Email,
                 tipo = registerModel.tipo,
             };
-
             _dbContext.Users.Add(user);
-            await _dbContext.SaveChangesAsync();
-
-            // Salva na DM_VEICULO
 
             var veiculo = new Veiculo
             {
                 Id_Veiculo = Guid.NewGuid(),
-                Modelo = registerModel.Modelo,
+                Modelo = registerModel.modelo,
                 Placa = registerModel.LicensePlate
             };
-            _dbContext.Veiculo.Add(veiculo);
-            await _dbContext.SaveChangesAsync();
-
-            // Salva na DM_ENDERECO
+            await _dbContext.Veiculo.AddAsync(veiculo);
+            _dbContext.SaveChanges();
 
             var endereco = new Endereco
             {
                 Id_Endereco = Guid.NewGuid(),
-                Local_real_time = ""
+                Local_real_time = "",
+                Lat_long = ""
             };
-            _dbContext.Endereco.Add(endereco);
-            await _dbContext.SaveChangesAsync();
+            await _dbContext.Endereco.AddAsync(endereco);
+            _dbContext.SaveChanges();
 
-
-            // Depois de salvar o usuário, verifique o tipo e insira manualmente nas tabelas Cliente ou Guincho
             if (user.tipo == "Motorista")
             {
                 var cliente = new AtualizaCliente
@@ -128,8 +166,8 @@ namespace TowFast_API.Controllers
                     DocumentoCliente = registerModel.CPF_CNPJ,
                     Telefone = registerModel.Phone
                 };
-                _dbContext.Cliente.Add(cliente);
-                await _dbContext.SaveChangesAsync();
+
+                await _dbContext.Cliente.AddAsync(cliente);
             }
             else if (user.tipo == "Guincho")
             {
@@ -141,41 +179,44 @@ namespace TowFast_API.Controllers
                     Nome = registerModel.Username,
                     Documento = registerModel.CPF_CNPJ,
                     Telefone = registerModel.Phone,
-                    Cnh = registerModel.cnh
+                    Cnh = registerModel.cnh,
+                    Ultimo_Status = DateTime.Now,
+                    Status = 0
                 };
-                _dbContext.Guincho.Add(guincho);
-                await _dbContext.SaveChangesAsync();
+
+                await _dbContext.Guincho.AddAsync(guincho);
             }
 
             await _dbContext.SaveChangesAsync();
 
-            return CreatedAtAction(nameof(Register), new { id = user.Id_Cliente }, user);
+            return Ok("Registrado com sucesso.");
         }
 
+        // Atualizar senha do usuário
         [HttpPut("updatePassword")]
         public async Task<IActionResult> UpdatePassword([FromBody] UpdatePasswordModel model)
         {
             if (model == null || string.IsNullOrEmpty(model.Username) || string.IsNullOrEmpty(model.NewPassword))
             {
-                return BadRequest("Username and new password are required.");
+                return BadRequest("Email e nova senha são obrigatórios.");
             }
 
             var user = await _dbContext.Users
                 .FirstOrDefaultAsync(x => EF.Functions.Like(x.Email.ToLower(), model.Username.ToLower()));
+
             if (user == null)
             {
-                return NotFound("User not found.");
+                return NotFound("Usuário não encontrado.");
             }
 
-            string hashedPassword = BCrypt.Net.BCrypt.HashPassword(model.NewPassword);
-            user.Password = hashedPassword;
+            user.Password = BCrypt.Net.BCrypt.HashPassword(model.NewPassword);
 
             _dbContext.Entry(user).State = EntityState.Modified;
             await _dbContext.SaveChangesAsync();
 
-            return Ok("Password updated successfully.");
+            return Ok("Senha atualizada com sucesso.");
         }
-
+    
         [HttpPut("atualizarlocalrealtime")]
         public IActionResult AtualizarLocalRealTime([FromBody] Endereco request)
         {
@@ -192,11 +233,12 @@ namespace TowFast_API.Controllers
             if (request.Local_real_time != null)
             {
                 endereco.Local_real_time = request.Local_real_time;
+                endereco.Lat_long = request.Lat_long;
             }
             else
             {
                 // Caso o valor enviado seja nulo, pode-se deixar o campo como null, se necessário
-                endereco.Local_real_time = null;
+                endereco.Local_real_time = "";
             }
 
             // Salvar as alterações no banco
@@ -206,11 +248,109 @@ namespace TowFast_API.Controllers
             return Ok("Local_real_time atualizado com sucesso.");
         }
 
+        [HttpPut("AtualizaStatusGuincho")]
+        public IActionResult StatusGuincho([FromBody] AtualizaStatusGuincho request)
+        {
+            var guincho = _dbContext.Guincho.FirstOrDefault(e => e.Id_Cliente == request.Id_cliente);
 
+            if(guincho == null)
+            {
+                return NotFound("Cliente nao encontrado");
+            }
+
+            if(request.Status != null)
+            {
+                guincho.Status = request.Status;
+                guincho.Ultimo_Status = DateTime.Now;
+            }
+            else
+            {
+                guincho.Status = guincho.Status;
+                guincho.Ultimo_Status = guincho.Ultimo_Status;
+            }
+
+            _dbContext.SaveChanges();
+            return Ok("Status atualizado");
+        }
+
+        [HttpPut("preSolicitacao")]
+        public IActionResult preSoli([FromBody] preSolicitacao request)
+        {
+            if (request == null)
+            {
+                return BadRequest("A solicitação não pode ser nula.");
+            }
+
+            try
+            {
+                // Adiciona a solicitação recebida ao contexto do banco de dados
+                _dbContext.preSolicitacao.Add(request);
+
+                // Salva as mudanças no banco de dados
+                _dbContext.SaveChanges();
+
+                // Retorna um status de sucesso com o ID gerado
+                return Ok(new { message = "Solicitação registrada com sucesso."});
+            }
+            catch (Exception ex)
+            {
+                // Loga a exceção detalhada para diagnóstico
+                var innerExceptionMessage = ex.InnerException != null ? ex.InnerException.Message : "Sem detalhes da exceção interna.";
+
+                // Retorna o erro com a mensagem detalhada
+                return StatusCode(500, new { message = "Erro ao registrar solicitação.", error = ex.Message, innerError = innerExceptionMessage });
+            }
+        }
+
+
+
+        [HttpGet]
+        [Route("GetGuinchosAtivos")]
+        public IActionResult GetGuinchosAtivos()
+        {
+            try
+            {
+                // Obter a string de conexão do appsettings.json
+                string connectionString = _configuration.GetConnectionString("SqlTowFast");
+
+                using (SqlConnection connection = new SqlConnection(connectionString))
+                {
+                    using (SqlCommand command = new SqlCommand("GetGuinchosAtivos", connection))
+                    {
+                        command.CommandType = CommandType.StoredProcedure;
+                        connection.Open();
+
+                        using (SqlDataReader reader = command.ExecuteReader())
+                        {
+                            var result = new List<object>();
+
+                            while (reader.Read())
+                            {
+                                result.Add(new
+                                {
+                                    Nome = reader["Nome"].ToString(),
+                                    Telefone = reader["Telefone"].ToString(),
+                                    Modelo = reader["Modelo"].ToString(),
+                                    Lat_long = reader["Lat_long"].ToString()
+                                });
+                            }
+
+                            return Ok(result);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "Erro ao buscar guinchos ativos.", error = ex.Message });
+            }
+        }
     }
 
-    // Models for requests
-    public class LoginRequest
+    
+
+// Models for requests
+public class LoginRequest
     {
         public string Email { get; set; }
         public string Password { get; set; }
@@ -226,11 +366,19 @@ namespace TowFast_API.Controllers
     public class LoginResponse
     {
         public Guid Id { get; set; }
+        public Guid Id_Endereco {  get; set; }
+        public Guid Id_Veiculo { get; set; }
         public string Email { get; set; }
         public string Message { get; set; }
         public string Tipo { get; set; }
     }
 
+    public class AtualizaStatusGuincho
+    {
+        public Guid Id_cliente { get; set; }
+        public int Status { get; set; }
+        public DateTime UltimoStatus { get; set; }
+    }
 
     public class ModelGeral
     {
@@ -240,11 +388,16 @@ namespace TowFast_API.Controllers
         public string Phone { get; set; }
         public string CPF_CNPJ { get; set; }
         public string LicensePlate { get; set; }
-        public string Modelo { get; set; }
+        public string modelo { get; set; }
         [DisplayFormat(DataFormatString = "{0:yyyy-MM-dd}", ApplyFormatInEditMode = true)]
         public DateTime BirthDate { get; set; }
         public string cnh { get; set; }
         public string tipo { get; set; }
+        [DisplayFormat(DataFormatString = "{0:yyyy-MM-dd}", ApplyFormatInEditMode = true)]
+        [JsonIgnore]
+        public DateTime UltimoStatus { get; set; }
+        [JsonIgnore]
+        public int Status { get; set; }
 
     }
 

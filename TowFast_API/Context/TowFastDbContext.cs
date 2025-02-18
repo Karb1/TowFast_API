@@ -15,8 +15,7 @@ namespace TowFast_API.Context
         public DbSet<AtualizaCliente> Cliente { get; set; }
         public DbSet<AtualizaGuincho> Guincho { get; set; }
         public DbSet<Veiculo> Veiculo { get; set; }
-
-
+        public DbSet<preSolicitacao> preSolicitacao { get; set; }
 
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
