@@ -7,7 +7,7 @@ namespace TowFast_API.Models
     {
         [Key]
         [JsonIgnore]
-        public int Id_Solicitacao { get; set; }
+        public Guid Id_Solicitacao { get; set; }
         public Guid Id_Motorista { get; set; }
         public Guid Id_Guincho { get; set; }
         public string Distancia { get; set; }

@@ -273,7 +273,7 @@ namespace TowFast_API.Controllers
             return Ok("Status atualizado");
         }
 
-        [HttpPut("preSolicitacao")]
+        [HttpPost("preSolicitacao")]
         public IActionResult preSoli([FromBody] preSolicitacao request)
         {
             if (request == null)
@@ -281,27 +281,31 @@ namespace TowFast_API.Controllers
                 return BadRequest("A solicitação não pode ser nula.");
             }
 
+            var solicitacao = new preSolicitacao
+            {
+                Id_Solicitacao = Guid.NewGuid(),
+                Id_Motorista = request.Id_Motorista,
+                Id_Guincho = request.Id_Guincho,
+                Distancia = request.Distancia,
+                Preco = request.Preco,
+                LatLongCliente = request.LatLongCliente,
+                LatLongGuincho = request.LatLongGuincho,
+                Status = request.Status,
+                Dta_Solicitacao = request.Dta_Solicitacao,
+            };
+
             try
             {
-                // Adiciona a solicitação recebida ao contexto do banco de dados
                 _dbContext.preSolicitacao.Add(request);
-
-                // Salva as mudanças no banco de dados
                 _dbContext.SaveChanges();
-
-                // Retorna um status de sucesso com o ID gerado
                 return Ok(new { message = "Solicitação registrada com sucesso."});
             }
             catch (Exception ex)
             {
-                // Loga a exceção detalhada para diagnóstico
                 var innerExceptionMessage = ex.InnerException != null ? ex.InnerException.Message : "Sem detalhes da exceção interna.";
-
-                // Retorna o erro com a mensagem detalhada
                 return StatusCode(500, new { message = "Erro ao registrar solicitação.", error = ex.Message, innerError = innerExceptionMessage });
             }
         }
-
 
 
         [HttpGet]
